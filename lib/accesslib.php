@@ -2135,7 +2135,7 @@ function can_access_course(stdClass $course, $user = null, $withcapability = '',
  * @category  access
  *
  * @param context $context
- * @param string $withcapability
+ * @param string $withcapability deprecated - use get_with_capability_join()
  * @param int $groupid 0 means ignore groups, any other value limits the result by group id
  * @param bool $onlyactive consider only active enrolments in enabled plugins and time restrictions
  * @return array list($sql, $params)
@@ -2148,6 +2148,59 @@ function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, 
     $i++;
     $prefix = 'eu'.$i.'_';
 
+    $joins  = array();
+    $wheres = array();
+    $paramsenrol = array();
+    $paramscap = array();
+
+    // get all relevant capability info for all roles
+    if ($withcapability) {
+        list($joins[], $wheres[], $paramscap) = get_with_capability_join($context, $withcapability, $prefix.'u.id');
+    }
+
+    if ($groupid) {
+        $joins[] = "JOIN {groups_members} {$prefix}gm ON ({$prefix}gm.userid = {$prefix}u.id AND {$prefix}gm.groupid = :{$prefix}gmid)";
+        $params["{$prefix}gmid"] = $groupid;
+    }
+
+    list($joins[], $wheres[], $paramsenrol) = get_enrolled_join($context, $prefix.'u.id', $onlyactive);
+
+    $wheres[] = "{$prefix}u.deleted = 0";
+
+    $joins = implode("\n", $joins);
+    $wheres = "WHERE ".implode(" AND ", $wheres);
+
+    $sql = "SELECT DISTINCT {$prefix}u.id
+              FROM {user} {$prefix}u
+            $joins
+           $wheres";
+    return array($sql, array_merge($paramsenrol, $paramscap));
+}
+
+
+
+/**
+ * Returns array with sql joins and parameters returning all ids
+ * of users enrolled into course.
+ *
+ * This function is using 'eu[0-9]+_' prefix for table names and parameters.
+ *
+ * @package   core_enrol
+ * @category  access
+ *
+ * @param context $context
+ * @params string $useridcolumn User id column used the calling query, e.g. u.id
+ * @param bool $onlyactive consider only active enrolments in enabled plugins and time restrictions
+ * @return array list($sql, $params)
+ */
+function get_enrolled_join(context $context, $useridcolumn, $onlyactive) {
+    global $DB, $CFG;
+
+    // use unique prefix just in case somebody makes some SQL magic with the result
+    static $i = 0;
+    $i++;
+    $prefix = 'ej'.$i.'_';
+
     // first find the course context
     $coursecontext = $context->get_course_context();
 
@@ -2157,119 +2210,12 @@ function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, 
     $wheres = array();
     $params = array();
 
-    list($contextids, $contextpaths) = get_context_info_list($context);
-
-    // get all relevant capability info for all roles
-    if ($withcapability) {
-        list($incontexts, $cparams) = $DB->get_in_or_equal($contextids, SQL_PARAMS_NAMED, 'ctx');
-        $cparams['cap'] = $withcapability;
-
-        $defs = array();
-        $sql = "SELECT rc.id, rc.roleid, rc.permission, ctx.path
-                  FROM {role_capabilities} rc
-                  JOIN {context} ctx on rc.contextid = ctx.id
-                 WHERE rc.contextid $incontexts AND rc.capability = :cap";
-        $rcs = $DB->get_records_sql($sql, $cparams);
-        foreach ($rcs as $rc) {
-            $defs[$rc->path][$rc->roleid] = $rc->permission;
-        }
-
-        $access = array();
-        if (!empty($defs)) {
-            foreach ($contextpaths as $path) {
-                if (empty($defs[$path])) {
-                    continue;
-                }
-                foreach($defs[$path] as $roleid => $perm) {
-                    if ($perm == CAP_PROHIBIT) {
-                        $access[$roleid] = CAP_PROHIBIT;
-                        continue;
-                    }
-                    if (!isset($access[$roleid])) {
-                        $access[$roleid] = (int)$perm;
-                    }
-                }
-            }
-        }
-
-        unset($defs);
-
-        // make lists of roles that are needed and prohibited
-        $needed     = array(); // one of these is enough
-        $prohibited = array(); // must not have any of these
-        foreach ($access as $roleid => $perm) {
-            if ($perm == CAP_PROHIBIT) {
-                unset($needed[$roleid]);
-                $prohibited[$roleid] = true;
-            } else if ($perm == CAP_ALLOW and empty($prohibited[$roleid])) {
-                $needed[$roleid] = true;
-            }
-        }
-
-        $defaultuserroleid      = isset($CFG->defaultuserroleid) ? $CFG->defaultuserroleid : 0;
-        $defaultfrontpageroleid = isset($CFG->defaultfrontpageroleid) ? $CFG->defaultfrontpageroleid : 0;
-
-        $nobody = false;
-
-        if ($isfrontpage) {
-            if (!empty($prohibited[$defaultuserroleid]) or !empty($prohibited[$defaultfrontpageroleid])) {
-                $nobody = true;
-            } else if (!empty($needed[$defaultuserroleid]) or !empty($needed[$defaultfrontpageroleid])) {
-                // everybody not having prohibit has the capability
-                $needed = array();
-            } else if (empty($needed)) {
-                $nobody = true;
-            }
-        } else {
-            if (!empty($prohibited[$defaultuserroleid])) {
-                $nobody = true;
-            } else if (!empty($needed[$defaultuserroleid])) {
-                // everybody not having prohibit has the capability
-                $needed = array();
-            } else if (empty($needed)) {
-                $nobody = true;
-            }
-        }
-
-        if ($nobody) {
-            // nobody can match so return some SQL that does not return any results
-            $wheres[] = "1 = 2";
-
-        } else {
-
-            if ($needed) {
-                $ctxids = implode(',', $contextids);
-                $roleids = implode(',', array_keys($needed));
-                $joins[] = "JOIN {role_assignments} {$prefix}ra3 ON ({$prefix}ra3.userid = {$prefix}u.id AND {$prefix}ra3.roleid IN ($roleids) AND {$prefix}ra3.contextid IN ($ctxids))";
-            }
-
-            if ($prohibited) {
-                $ctxids = implode(',', $contextids);
-                $roleids = implode(',', array_keys($prohibited));
-                $joins[] = "LEFT JOIN {role_assignments} {$prefix}ra4 ON ({$prefix}ra4.userid = {$prefix}u.id AND {$prefix}ra4.roleid IN ($roleids) AND {$prefix}ra4.contextid IN ($ctxids))";
-                $wheres[] = "{$prefix}ra4.id IS NULL";
-            }
-
-            if ($groupid) {
-                $joins[] = "JOIN {groups_members} {$prefix}gm ON ({$prefix}gm.userid = {$prefix}u.id AND {$prefix}gm.groupid = :{$prefix}gmid)";
-                $params["{$prefix}gmid"] = $groupid;
-            }
-        }
-
-    } else {
-        if ($groupid) {
-            $joins[] = "JOIN {groups_members} {$prefix}gm ON ({$prefix}gm.userid = {$prefix}u.id AND {$prefix}gm.groupid = :{$prefix}gmid)";
-            $params["{$prefix}gmid"] = $groupid;
-        }
-    }
-
-    $wheres[] = "{$prefix}u.deleted = 0 AND {$prefix}u.id <> :{$prefix}guestid";
-    $params["{$prefix}guestid"] = $CFG->siteguest;
+    $wheres[] = "1 = 1"; // prevent broken where clauses later on
 
     if ($isfrontpage) {
         // all users are "enrolled" on the frontpage
     } else {
-        $joins[] = "JOIN {user_enrolments} {$prefix}ue ON {$prefix}ue.userid = {$prefix}u.id";
+        $joins[] = "JOIN {user_enrolments} {$prefix}ue ON {$prefix}ue.userid = $useridcolumn";
         $joins[] = "JOIN {enrol} {$prefix}e ON ({$prefix}e.id = {$prefix}ue.enrolid AND {$prefix}e.courseid = :{$prefix}courseid)";
         $params[$prefix.'courseid'] = $coursecontext->instanceid;
 
@@ -2284,15 +2230,12 @@ function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, 
     }
 
     $joins = implode("\n", $joins);
-    $wheres = "WHERE ".implode(" AND ", $wheres);
+    $wheres = implode(" AND ", $wheres);
 
-    $sql = "SELECT DISTINCT {$prefix}u.id
-              FROM {user} {$prefix}u
-            $joins
-           $wheres";
-
-    return array($sql, $params);
+    return array($joins, $wheres, $params);
 }
+
+
 
 /**
  * Returns list of users enrolled into course.
