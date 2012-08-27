@@ -762,6 +762,53 @@ function groups_course_module_visible($cm, $userid=null) {
     return false;
 }
 
+
+/**
+ * Get sql joins to return users in a group
+ *
+ * @category group
+ * @param $groupid
+ * @param $useridcolumn The column of the user id from the calling SQL, e.g. u.id
+ * @return array
+ */
+function get_in_group_sql($groupid, $onlyactive=true) {
+    global $CFG, $DB;
+
+    list($join, $params) = get_in_group_join($groupid, 'u.id');
+
+    $sql = "SELECT DISTINCT u.id
+            FROM {user} u
+            $join
+            WHERE u.deleted = 0";
+
+    return array($sql, $params);
+
+}
+
+/**
+ * Get sql joins to return users in a group
+ *
+ * @category group
+ * @param $groupid
+ * @param $useridcolumn The column of the user id from the calling SQL, e.g. u.id
+ * @return array
+ */
+function get_in_group_join($groupid, $useridcolumn) {
+    global $CFG;
+
+    // use unique prefix just in case somebody makes some SQL magic with the result
+    static $i = 0;
+    $i++;
+    $prefix = 'gm'.$i.'_';
+
+    $params = array();
+
+    $join = "JOIN {groups_members} {$prefix}gm ON ({$prefix}gm.userid = $useridcolumn AND {$prefix}gm.groupid = :{$prefix}gmid)";
+    $params["{$prefix}gmid"] = $groupid;
+
+    return array($join, $params);
+}
+
 /**
  * Internal method, sets up $SESSION->activegroup and verifies previous value
  *

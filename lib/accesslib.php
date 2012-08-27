@@ -2136,7 +2136,7 @@ function can_access_course(stdClass $course, $user = null, $withcapability = '',
  *
  * @param context $context
  * @param string $withcapability deprecated - use get_with_capability_join()
- * @param int $groupid 0 means ignore groups, any other value limits the result by group id
+ * @param int $groupid deprecated - use get_in_group_join(). 0 means ignore groups, any other value limits the result by group id
  * @param bool $onlyactive consider only active enrolments in enabled plugins and time restrictions
  * @return array list($sql, $params)
  */
@@ -2152,6 +2152,7 @@ function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, 
     $wheres = array();
     $paramsenrol = array();
     $paramscap = array();
+    $paramsgroup = array();
 
     // get all relevant capability info for all roles
     if ($withcapability) {
@@ -2159,8 +2160,7 @@ function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, 
     }
 
     if ($groupid) {
-        $joins[] = "JOIN {groups_members} {$prefix}gm ON ({$prefix}gm.userid = {$prefix}u.id AND {$prefix}gm.groupid = :{$prefix}gmid)";
-        $params["{$prefix}gmid"] = $groupid;
+        list($joins[], $paramsgroup) = get_in_group_join($groupid, 'u.id');
     }
 
     list($joins[], $wheres[], $paramsenrol) = get_enrolled_join($context, $prefix.'u.id', $onlyactive);
@@ -2174,7 +2174,8 @@ function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, 
               FROM {user} {$prefix}u
             $joins
            $wheres";
-    return array($sql, array_merge($paramsenrol, $paramscap));
+
+    return array($sql, array_merge($paramsenrol, $paramscap, $paramsgroup));
 }
 
 

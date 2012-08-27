@@ -171,4 +171,42 @@ class grouplib_testcase extends advanced_testcase {
         $grouping = $generator->create_grouping(array('courseid' => $course->id, 'idnumber' => $idnumber2));
         $this->assertEquals(groups_get_grouping_by_idnumber($course->id, $idnumber2), $grouping);
     }
+
+
+    public function test_groups_get_in_group_sql() {
+        global $DB;
+
+        $this->resetAfterTest(true);
+
+        $generator = $this->getDataGenerator();
+
+        // Create a course category and course
+        $course = $generator->create_course();
+        $student = $generator->create_user();
+        $plugin = enrol_get_plugin('manual');
+        $role = $DB->get_record('role', array('shortname'=>'student'));
+        $group = $generator->create_group(array('courseid' => $course->id));
+        $instance = $DB->get_record('enrol', array(
+            'courseid' => $course->id,
+            'enrol' => 'manual',
+        ));
+
+        $this->assertNotEquals($instance, false);
+
+        // Enrol the user in the course
+        $plugin->enrol_user($instance, $student->id, $role->id);
+
+        list($sql, $params) = get_in_group_sql($group->id, true);
+
+        // Test an empty group
+        $users = $DB->get_records_sql($sql, $params);
+
+        $this->assertFalse(array_key_exists($student->id, $users));
+        groups_add_member($group->id, $student->id);
+
+        // Test with a group member
+        $users = $DB->get_records_sql($sql, $params);
+        $this->assertTrue(array_key_exists($student->id, $users));
+
+    }
 }
