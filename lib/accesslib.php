@@ -2256,11 +2256,30 @@ function get_enrolled_join(context $context, $useridcolumn, $onlyactive) {
 function get_enrolled_users(context $context, $withcapability = '', $groupid = 0, $userfields = 'u.*', $orderby = '', $limitfrom = 0, $limitnum = 0) {
     global $DB;
 
-    list($esql, $params) = get_enrolled_sql($context, $withcapability, $groupid);
-    $sql = "SELECT $userfields
+    $joins = array();
+    $wheres = array();
+    $eparams = array();
+    $cparams = array();
+    $gparams = array();
+
+    list($joins[], $wheres[], $eparams) = get_enrolled_join($context, 'u.id', false);
+
+    if ($withcapability) {
+        list($joins[], $wheres[], $cparams) = get_with_capability_join($context, $withcapability, 'u.id');
+    }
+
+    if ($groupid) {
+        list($joins[], $gparams) = get_in_group_join($groupid, 'u.id');
+    }
+
+    $joins = implode("\n", $joins);
+    $wheres = implode(" AND ", $wheres);
+    $params = array_merge($eparams, $cparams, $gparams);
+
+    $sql = "SELECT DISTINCT $userfields
               FROM {user} u
-              JOIN ($esql) je ON je.id = u.id
-             WHERE u.deleted = 0";
+              $joins
+             WHERE $wheres AND u.deleted = 0";
 
     if ($orderby) {
         $sql = "$sql ORDER BY $orderby";
