@@ -2518,5 +2518,54 @@ class accesslib_testcase extends advanced_testcase {
 
     }
 
+
+    /**
+     * Test count_enrolled_users()
+     *
+     * @return void
+     */
+    public function test_count_enrolled_users() {
+        global $DB;
+
+        // Generate data
+        $user = $this->getDataGenerator()->create_user();
+        $course = $this->getDataGenerator()->create_course();
+        $coursecontext = context_course::instance($course->id);
+        $role = $DB->get_record('role', array('shortname'=>'student'));
+
+        // There should be a manual enrolment as part of the default install
+        $plugin = enrol_get_plugin('manual');
+        $instance = $DB->get_record('enrol', array(
+                    'courseid' => $course->id,
+                    'enrol' => 'manual',
+                    ));
+        $this->assertNotEquals($instance, false);
+
+        // Enrol the user in the course
+        $plugin->enrol_user($instance, $user->id, $role->id);
+
+        // We'll test with the mod/assign:submit capability
+        $capability= 'mod/assign:submit';
+        $this->assertTrue($DB->record_exists('capabilities', array('name' => $capability)));
+
+        // Switch to our user
+        $this->setUser($user);
+
+        // Ensure that the user has the capability first
+        $this->assertTrue(has_capability($capability, $coursecontext, $user->id));
+
+        // We first test whether the user is enrolled on the course as this
+        // seeds the cache, then we test for the capability
+        $this->assertTrue(count_enrolled_users($coursecontext) === 1);
+        $this->assertTrue(count_enrolled_users($coursecontext, $capability) === 1);
+
+        // Prevent the capability for this user role
+        assign_capability($capability, CAP_PROHIBIT, $role->id, $coursecontext);
+        $coursecontext->mark_dirty();
+        $this->assertTrue(count_enrolled_users($coursecontext, $capability) === 0);
+
+        // We need variable states to be reset for the next test
+        $this->resetAfterTest(true);
+    }
 }
 
