@@ -181,5 +181,13 @@ $capabilities = array(
         'contextlevel' => CONTEXT_MODULE,
         'archetypes' => array()
     ),
+
+    'mod/quiz:appearinreports' => array(
+        'captype' => 'read',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => array(
+            'student' => CAP_ALLOW,
+        ),
+    ),
 );
 

@@ -78,7 +78,7 @@ abstract class quiz_attempts_report extends quiz_default_report {
 
         $this->context = context_module::instance($cm->id);
 
-        list($currentgroup, $students, $groupstudents, $allowed) =
+        list($currentgroup, $studentssql, $groupstudentssql, $allowedsql) =
                 $this->load_relevant_students($cm, $course);
 
         $this->qmsubselect = quiz_report_qm_filter_select($quiz);
@@ -87,7 +87,7 @@ abstract class quiz_attempts_report extends quiz_default_report {
                 array('qmsubselect' => $this->qmsubselect, 'quiz' => $quiz,
                 'currentgroup' => $currentgroup, 'context' => $this->context));
 
-        return array($currentgroup, $students, $groupstudents, $allowed);
+        return array($currentgroup, $studentssql, $groupstudentssql, $allowedsql);
     }
 
     /**
@@ -117,28 +117,16 @@ abstract class quiz_attempts_report extends quiz_default_report {
             return array($currentgroup, array(), array(), array());
         }
 
-        if (!$students = get_users_by_capability($this->context,
-                array('mod/quiz:reviewmyattempts', 'mod/quiz:attempt'),
-                'u.id, 1', '', '', '', '', '', false)) {
-            $students = array();
-        } else {
-            $students = array_keys($students);
-        }
+        $studentssql = get_enrolled_sql($this->context, 'mod/quiz:appearinreports');
 
         if (empty($currentgroup)) {
-            return array($currentgroup, $students, array(), $students);
+            return array($currentgroup, $studentssql, array(), $studentssql);
         }
 
         // We have a currently selected group.
-        if (!$groupstudents = get_users_by_capability($this->context,
-                array('mod/quiz:reviewmyattempts', 'mod/quiz:attempt'),
-                'u.id, 1', '', '', '', $currentgroup, '', false)) {
-            $groupstudents = array();
-        } else {
-            $groupstudents = array_keys($groupstudents);
-        }
+        $groupstudentssl = get_enrolled_sql($this->context, 'mod/quiz:appearinreports', $currentgroup);
 
-        return array($currentgroup, $students, $groupstudents, $groupstudents);
+        return array($currentgroup, $studentssql, $groupstudentssql, $groupstudentssql);
     }
 
     /**
@@ -312,10 +300,6 @@ abstract class quiz_attempts_report extends quiz_default_report {
             $attempt = $DB->get_record('quiz_attempts', array('id' => $attemptid));
             if (!$attempt || $attempt->quiz != $quiz->id || $attempt->preview != 0) {
                 // Ensure the attempt exists, and belongs to this quiz. If not skip.
-                continue;
-            }
-            if ($allowed && !in_array($attempt->userid, $allowed)) {
-                // Ensure the attempt belongs to a student included in the report. If not skip.
                 continue;
             }
             add_to_log($quiz->course, 'quiz', 'delete attempt', 'report.php?id=' . $cm->id,

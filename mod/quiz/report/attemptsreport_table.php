@@ -61,11 +61,11 @@ abstract class quiz_attempts_report_table extends table_sql {
     /** @var object mod_quiz_attempts_report_options the options affecting this report. */
     protected $options;
 
-    /** @var object the ids of the students in the currently selected group, if applicable. */
-    protected $groupstudents;
+    /** @var array of sql + parameters to find students in the currently selected group, if applicable. */
+    protected $groupstudentssql;
 
-    /** @var object the ids of the students in the course. */
-    protected $students;
+    /** @var array of sql + parameters to find the students in the course. */
+    protected $studentssql;
 
     /** @var object the questions that comprise this quiz.. */
     protected $questions;
@@ -86,14 +86,14 @@ abstract class quiz_attempts_report_table extends table_sql {
      * @param moodle_url $reporturl
      */
     public function __construct($uniqueid, $quiz, $context, $qmsubselect,
-            mod_quiz_attempts_report_options $options, $groupstudents, $students,
+            mod_quiz_attempts_report_options $options, $groupstudentssql, $studentssql,
             $questions, $reporturl) {
         parent::__construct($uniqueid);
         $this->quiz = $quiz;
         $this->context = $context;
         $this->qmsubselect = $qmsubselect;
-        $this->groupstudents = $groupstudents;
-        $this->students = $students;
+        $this->groupstudentssql = $groupstudentssql;
+        $this->studentssql = $studentssql;
         $this->questions = $questions;
         $this->includecheckboxes = $options->checkboxcolumn;
         $this->reporturl = $reporturl;
@@ -342,7 +342,7 @@ abstract class quiz_attempts_report_table extends table_sql {
      * @return array with 4 elements ($fields, $from, $where, $params) that can be used to
      *      build the actual database query.
      */
-    public function base_sql($reportstudents) {
+    public function base_sql($reportstudentssql) {
         global $DB;
 
         $fields = $DB->sql_concat('u.id', "'#'", 'COALESCE(quiza.attempt, 0)') . ' AS uniqueid,';
@@ -394,24 +394,21 @@ abstract class quiz_attempts_report_table extends table_sql {
                 break;
             case quiz_attempts_report::ENROLLED_WITH:
                 // Show only students with attempts.
-                list($usql, $uparams) = $DB->get_in_or_equal(
-                        $reportstudents, SQL_PARAMS_NAMED, 'u');
-                $params += $uparams;
-                $where = "u.id $usql AND quiza.preview = 0 AND quiza.id IS NOT NULL";
+                $params += $reportstudentssql[1];
+                $from .= "\nINNER JOIN ({$reportstudentssql[0]}) as enr ON enr.id = u.id";
+                $where = "quiza.preview = 0 AND quiza.id IS NOT NULL";
                 break;
             case quiz_attempts_report::ENROLLED_WITHOUT:
                 // Show only students without attempts.
-                list($usql, $uparams) = $DB->get_in_or_equal(
-                        $reportstudents, SQL_PARAMS_NAMED, 'u');
-                $params += $uparams;
-                $where = "u.id $usql AND quiza.id IS NULL";
+                $params += $reportstudentssql[1];
+                $from .= "\nINNER JOIN ({$reportstudentssql[0]}) as enr ON enr.id = u.id";
+                $where = "quiza.id IS NULL";
                 break;
             case quiz_attempts_report::ENROLLED_ALL:
                 // Show all students with or without attempts.
-                list($usql, $uparams) = $DB->get_in_or_equal(
-                        $reportstudents, SQL_PARAMS_NAMED, 'u');
-                $params += $uparams;
-                $where = "u.id $usql AND (quiza.preview = 0 OR quiza.preview IS NULL)";
+                $params += $reportstudentssql[1];
+                $from .= "\nINNER JOIN ({$reportstudentssql[0]}) as enr ON enr.id = u.id";
+                $where = "(quiza.preview = 0 OR quiza.preview IS NULL)";
                 break;
         }
 

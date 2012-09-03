@@ -88,18 +88,17 @@ class quiz_statistics_report extends quiz_default_report {
         $nostudentsingroup = false; // True if a group is selected and there is no one in it.
         if (empty($currentgroup)) {
             $currentgroup = 0;
-            $groupstudents = array();
+            $groupstudentssql = array();
 
         } else if ($currentgroup == self::NO_GROUPS_ALLOWED) {
-            $groupstudents = array();
+            $groupstudentssql = array();
             $nostudentsingroup = true;
 
         } else {
             // All users who can attempt quizzes and who are in the currently selected group.
-            $groupstudents = get_users_by_capability($this->context,
-                    array('mod/quiz:reviewmyattempts', 'mod/quiz:attempt'),
-                    '', '', '', '', $currentgroup, '', false);
-            if (!$groupstudents) {
+            $groupstudentssql = get_enrolled_sql($this->context,
+                    array('mod/quiz:reviewmyattempts', 'mod/quiz:attempt'), $currentgroup);
+            if (!$DB->record_exists_sql($groupstudentssql[0], $groupstudentssql[1])) {
                 $nostudentsingroup = true;
             }
         }
@@ -141,7 +140,7 @@ class quiz_statistics_report extends quiz_default_report {
         // Get the data to be displayed.
         list($quizstats, $questions, $subquestions, $s) =
                 $this->get_quiz_and_questions_stats($quiz, $currentgroup,
-                        $nostudentsingroup, $useallattempts, $groupstudents, $questions);
+                        $nostudentsingroup, $useallattempts, $groupstudentssql, $questions);
         $quizinfo = $this->get_formatted_quiz_info_data($course, $cm, $quiz, $quizstats);
 
         // Set up the table, if there is data.
@@ -155,7 +154,7 @@ class quiz_statistics_report extends quiz_default_report {
 
             if (groups_get_activity_groupmode($cm)) {
                 groups_print_activity_menu($cm, $reporturl->out());
-                if ($currentgroup && !$groupstudents) {
+                if ($currentgroup && !$DB->record_exists_sql($groupstudentssql[0], $groupstudentssql[1])) {
                     $OUTPUT->notification(get_string('nostudentsingroup', 'quiz_statistics'));
                 }
             }
@@ -240,7 +239,7 @@ class quiz_statistics_report extends quiz_default_report {
             // On-screen display of overview report.
             echo $OUTPUT->heading(get_string('quizinformation', 'quiz_statistics'));
             echo $this->output_caching_info($quizstats, $quiz->id, $currentgroup,
-                    $groupstudents, $useallattempts, $reporturl);
+                    $groupstudentssql, $useallattempts, $reporturl);
             echo $this->everything_download_options();
             echo $this->output_quiz_info_table($quizinfo);
             if ($s) {
@@ -624,7 +623,7 @@ class quiz_statistics_report extends quiz_default_report {
      * @param int $currentgroup the current group. 0 for none.
      * @param bool $nostudentsingroup true if there a no students.
      * @param bool $useallattempts use all attempts, or just first attempts.
-     * @param array $groupstudents students in this group.
+     * @param array $groupstudentssql students in this group.
      * @param array $questions question definitions.
      * @return array with three elements:
      *      - integer $s Number of attempts included in the stats.
@@ -632,7 +631,7 @@ class quiz_statistics_report extends quiz_default_report {
      *      - array $qstats The statistics for each question.
      */
     protected function compute_stats($quizid, $currentgroup, $nostudentsingroup,
-            $useallattempts, $groupstudents, $questions) {
+            $useallattempts, $groupstudentssql, $questions) {
         global $DB;
 
         // Calculating MEAN of marks for all attempts by students
@@ -643,7 +642,7 @@ class quiz_statistics_report extends quiz_default_report {
         }
 
         list($fromqa, $whereqa, $qaparams) = quiz_statistics_attempts_sql(
-                $quizid, $currentgroup, $groupstudents, true);
+                $quizid, $currentgroup, $groupstudentssql, true);
 
         $attempttotals = $DB->get_records_sql("
                 SELECT
@@ -701,7 +700,7 @@ class quiz_statistics_report extends quiz_default_report {
 
         // Recalculate sql again this time possibly including test for first attempt.
         list($fromqa, $whereqa, $qaparams) = quiz_statistics_attempts_sql(
-                $quizid, $currentgroup, $groupstudents, $useallattempts);
+                $quizid, $currentgroup, $groupstudentssql, $useallattempts);
 
         // Median ...
         if ($s % 2 == 0) {
@@ -765,7 +764,7 @@ class quiz_statistics_report extends quiz_default_report {
         }
 
         $qstats = new quiz_statistics_question_stats($questions, $s, $summarksavg);
-        $qstats->load_step_data($quizid, $currentgroup, $groupstudents, $useallattempts);
+        $qstats->load_step_data($quizid, $currentgroup, $groupstudentssql, $useallattempts);
         $qstats->compute_statistics();
 
         if ($s > 1) {
@@ -789,7 +788,7 @@ class quiz_statistics_report extends quiz_default_report {
      * @param int $currentgroup the current group. 0 for none.
      * @param bool $nostudentsingroup true if there a no students.
      * @param bool $useallattempts use all attempts, or just first attempts.
-     * @param array $groupstudents students in this group.
+     * @param array $groupstudentssql students in this group.
      * @param array $questions question definitions.
      * @return array with 4 elements:
      *     - $quizstats The statistics for overall attempt scores.
@@ -799,7 +798,7 @@ class quiz_statistics_report extends quiz_default_report {
      * If there is no cached data in the database, returns an array of four nulls.
      */
     protected function try_loading_cached_stats($quiz, $currentgroup,
-            $nostudentsingroup, $useallattempts, $groupstudents, $questions) {
+            $nostudentsingroup, $useallattempts, $groupstudentssql, $questions) {
         global $DB;
 
         $timemodified = time() - self::TIME_TO_CACHE_STATS;
@@ -894,7 +893,7 @@ class quiz_statistics_report extends quiz_default_report {
      * @param int $currentgroup the current group. 0 for none.
      * @param bool $nostudentsingroup true if there a no students.
      * @param bool $useallattempts use all attempts, or just first attempts.
-     * @param array $groupstudents students in this group.
+     * @param array $groupstudentssql students in this group.
      * @param array $questions question definitions.
      * @return array with 4 elements:
      *     - $quizstats The statistics for overall attempt scores.
@@ -903,15 +902,15 @@ class quiz_statistics_report extends quiz_default_report {
      *     - $s Number of attempts included in the stats.
      */
     protected function get_quiz_and_questions_stats($quiz, $currentgroup,
-            $nostudentsingroup, $useallattempts, $groupstudents, $questions) {
+            $nostudentsingroup, $useallattempts, $groupstudentssql, $questions) {
 
         list($quizstats, $questions, $subquestions, $s) =
                 $this->try_loading_cached_stats($quiz, $currentgroup, $nostudentsingroup,
-                        $useallattempts, $groupstudents, $questions);
+                        $useallattempts, $groupstudentssql, $questions);
 
         if (is_null($quizstats)) {
             list($s, $quizstats, $qstats) = $this->compute_stats($quiz->id,
-                    $currentgroup, $nostudentsingroup, $useallattempts, $groupstudents, $questions);
+                    $currentgroup, $nostudentsingroup, $useallattempts, $groupstudentssql, $questions);
 
             if ($s) {
                 $questions = $qstats->questions;
@@ -921,7 +920,7 @@ class quiz_statistics_report extends quiz_default_report {
                         $quizstats, $questions, $subquestions);
 
                 $this->analyse_responses($quizstatisticsid, $quiz->id, $currentgroup,
-                        $nostudentsingroup, $useallattempts, $groupstudents,
+                        $nostudentsingroup, $useallattempts, $groupstudentssql,
                         $questions, $subquestions);
             }
         }
@@ -930,10 +929,10 @@ class quiz_statistics_report extends quiz_default_report {
     }
 
     protected function analyse_responses($quizstatisticsid, $quizid, $currentgroup,
-            $nostudentsingroup, $useallattempts, $groupstudents, $questions, $subquestions) {
+            $nostudentsingroup, $useallattempts, $groupstudentssql, $questions, $subquestions) {
 
         $qubaids = quiz_statistics_qubaids_condition(
-                $quizid, $currentgroup, $groupstudents, $useallattempts);
+                $quizid, $currentgroup, $groupstudentssql, $useallattempts);
 
         $done = array();
         foreach ($questions as $question) {
@@ -984,14 +983,14 @@ class quiz_statistics_report extends quiz_default_report {
      * @param object $quizstats the overall quiz statistics.
      * @param int $quizid the quiz id.
      * @param int $currentgroup the id of the currently selected group, or 0.
-     * @param array $groupstudents ids of students in the group.
+     * @param array $groupstudentssql sql + params for students in group
      * @param bool $useallattempts whether to use all attempts, instead of just
      *      first attempts.
      * @return string a HTML snipped saying when the stats were last computed,
      *      or blank if that is not appropriate.
      */
     protected function output_caching_info($quizstats, $quizid, $currentgroup,
-            $groupstudents, $useallattempts, $reporturl) {
+            $groupstudentssql, $useallattempts, $reporturl) {
         global $DB, $OUTPUT;
 
         if (empty($quizstats->timemodified)) {
@@ -1000,7 +999,7 @@ class quiz_statistics_report extends quiz_default_report {
 
         // Find the number of attempts since the cached statistics were computed.
         list($fromqa, $whereqa, $qaparams) = quiz_statistics_attempts_sql(
-                $quizid, $currentgroup, $groupstudents, $useallattempts, true);
+                $quizid, $currentgroup, $groupstudentssql, $useallattempts, true);
         $count = $DB->count_records_sql("
                 SELECT COUNT(1)
                 FROM $fromqa
@@ -1069,7 +1068,7 @@ class quiz_statistics_report extends quiz_default_report {
     }
 }
 
-function quiz_statistics_attempts_sql($quizid, $currentgroup, $groupstudents,
+function quiz_statistics_attempts_sql($quizid, $currentgroup, $groupstudentssql,
         $allattempts = true, $includeungraded = false) {
     global $DB;
 
@@ -1078,11 +1077,9 @@ function quiz_statistics_attempts_sql($quizid, $currentgroup, $groupstudents,
     $whereqa = 'quiza.quiz = :quizid AND quiza.preview = 0 AND quiza.state = :quizstatefinished';
     $qaparams = array('quizid' => $quizid, 'quizstatefinished' => quiz_attempt::FINISHED);
 
-    if (!empty($currentgroup) && $groupstudents) {
-        list($grpsql, $grpparams) = $DB->get_in_or_equal(array_keys($groupstudents),
-                SQL_PARAMS_NAMED, 'u');
-        $whereqa .= " AND quiza.userid $grpsql";
-        $qaparams += $grpparams;
+    if (!empty($currentgroup) && $groupstudentssql) {
+        $usersjoin = "JOIN ({$groupstudentssql[0]}) AS enr ON quiza.userid = enr.id";
+        $qaparams += $groupstudentssql[1];
     }
 
     if (!$allattempts) {
@@ -1102,9 +1099,9 @@ function quiz_statistics_attempts_sql($quizid, $currentgroup, $groupstudents,
  * @param string $fromqa from quiz_statistics_attempts_sql.
  * @param string $whereqa from quiz_statistics_attempts_sql.
  */
-function quiz_statistics_qubaids_condition($quizid, $currentgroup, $groupstudents,
+function quiz_statistics_qubaids_condition($quizid, $currentgroup, $groupstudentssql,
         $allattempts = true, $includeungraded = false) {
     list($fromqa, $whereqa, $qaparams) = quiz_statistics_attempts_sql($quizid, $currentgroup,
-            $groupstudents, $allattempts, $includeungraded);
+            $groupstudentssql, $allattempts, $includeungraded);
     return new qubaid_join($fromqa, 'quiza.uniqueid', $whereqa, $qaparams);
 }

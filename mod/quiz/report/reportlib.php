@@ -186,10 +186,10 @@ function quiz_report_qm_filter_select($quiz, $quizattemptsalias = 'quiza') {
  * @param number $bandwidth the width of each band.
  * @param int $bands the number of bands
  * @param int $quizid the quiz id.
- * @param array $userids list of user ids.
+ * @param array $userssql sql + parameters to get enrolled users
  * @return array band number => number of users with scores in that band.
  */
-function quiz_report_grade_bands($bandwidth, $bands, $quizid, $userids = array()) {
+function quiz_report_grade_bands($bandwidth, $bands, $quizid, $userssql = array()) {
     global $DB;
     if (!is_int($bands)) {
         debugging('$bands passed to quiz_report_grade_bands must be an integer. (' .
@@ -197,11 +197,11 @@ function quiz_report_grade_bands($bandwidth, $bands, $quizid, $userids = array()
         $bands = (int) $bands;
     }
 
-    if ($userids) {
-        list($usql, $params) = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'u');
-        $usql = "qg.userid $usql AND";
+    if ($userssql) {
+        $userjoin = "JOIN ({$userssql[0]}) AS enr ON enr.id = qg.userid";
+        $params = $userssql[1];
     } else {
-        $usql = '';
+        $userjoin = '';
         $params = array();
     }
     $sql = "
@@ -210,7 +210,8 @@ SELECT band, COUNT(1)
 FROM (
     SELECT FLOOR(qg.grade / :bandwidth) AS band
       FROM {quiz_grades} qg
-     WHERE $usql qg.quiz = :quizid
+      $userjoin
+     WHERE qg.quiz = :quizid
 ) subquery
 
 GROUP BY

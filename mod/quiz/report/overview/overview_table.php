@@ -68,12 +68,12 @@ class quiz_overview_table extends quiz_attempts_report_table {
         // End of adding the data from attempts. Now add averages at bottom.
         $this->add_separator();
 
-        if ($this->groupstudents) {
-            $this->add_average_row(get_string('groupavg', 'grades'), $this->groupstudents);
+        if ($this->groupstudentssql) {
+            $this->add_average_row(get_string('groupavg', 'grades'), $this->groupstudentssql);
         }
 
-        if ($this->students) {
-            $this->add_average_row(get_string('overallaverage', 'grades'), $this->students);
+        if ($this->studentssql) {
+            $this->add_average_row(get_string('overallaverage', 'grades'), $this->studentssql);
         }
     }
 
@@ -82,10 +82,10 @@ class quiz_overview_table extends quiz_attempts_report_table {
      * @param string $label the title ot use for this row.
      * @param array $users the users to average over.
      */
-    protected function add_average_row($label, $users) {
+    protected function add_average_row($label, $userssql) {
         global $DB;
 
-        list($fields, $from, $where, $params) = $this->base_sql($users);
+        list($fields, $from, $where, $params) = $this->base_sql($userssql);
         $record = $DB->get_record_sql("
                 SELECT AVG(quiza.sumgrades) AS grade, COUNT(quiza.sumgrades) AS numaveraged
                   FROM $from

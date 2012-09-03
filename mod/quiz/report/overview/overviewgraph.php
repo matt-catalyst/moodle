@@ -46,15 +46,9 @@ if ($groupid && $groupmode = groups_get_activity_groupmode($cm)) {
         print_error('errorinvalidgroup', 'group', null, $groupid);
     }
     $group = $groups[$groupid];
-    $groupusers = get_users_by_capability($modcontext,
-            array('mod/quiz:reviewmyattempts', 'mod/quiz:attempt'),
-            '', '', '', '', $group->id, '', false);
-    if (!$groupusers) {
-        print_error('nostudentsingroup');
-    }
-    $groupusers = array_keys($groupusers);
+    $groupuserssql = get_enrolled_sql($modcontext, 'mod/quiz:appearinreports', $group->id);
 } else {
-    $groupusers = array();
+    $groupuserssql = array();
 }
 
 $line = new graph(800, 600);
@@ -106,7 +100,7 @@ $line->y_format['allusers'] = array(
     'shadow_offset' => 1,
     'legend' => get_string('allparticipants')
 );
-$line->y_data['allusers'] = quiz_report_grade_bands($bandwidth, $bands, $quizid, $groupusers);
+$line->y_data['allusers'] = quiz_report_grade_bands($bandwidth, $bands, $quizid, $groupuserssql);
 
 $line->y_order = array('allusers');
 

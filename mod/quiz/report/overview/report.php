@@ -42,7 +42,7 @@ class quiz_overview_report extends quiz_attempts_report {
     public function display($quiz, $cm, $course) {
         global $CFG, $DB, $OUTPUT, $PAGE;
 
-        list($currentgroup, $students, $groupstudents, $allowed) =
+        list($currentgroup, $studentssql, $groupstudentssql, $allowedsql) =
                 $this->init('overview', 'quiz_overview_settings_form', $quiz, $cm, $course);
         $options = new quiz_overview_options('overview', $quiz, $cm, $course);
 
@@ -69,7 +69,7 @@ class quiz_overview_report extends quiz_attempts_report {
         $courseshortname = format_string($course->shortname, true,
                 array('context' => context_course::instance($course->id)));
         $table = new quiz_overview_table($quiz, $this->context, $this->qmsubselect,
-                $options, $groupstudents, $students, $questions, $this->get_base_url());
+                $options, $groupstudentssql, $studentssql, $questions, $this->get_base_url());
         $filename = quiz_report_download_filename(get_string('overviewfilename', 'quiz_overview'),
                 $courseshortname, $quiz->name);
         $table->is_downloading($options->download, $filename,
@@ -78,7 +78,7 @@ class quiz_overview_report extends quiz_attempts_report {
             raise_memory_limit(MEMORY_EXTRA);
         }
 
-        $this->process_actions($quiz, $cm, $currentgroup, $groupstudents, $allowed, $options->get_url());
+        $this->process_actions($quiz, $cm, $currentgroup, $groupstudentssql, $allowedsql, $options->get_url());
 
         // Start output.
         if (!$table->is_downloading()) {
@@ -101,11 +101,16 @@ class quiz_overview_report extends quiz_attempts_report {
             }
         }
 
+        $hasstudents = $DB->record_exists_sql($studentssql[0], $studentssql[1]);
+        if (!empty($groupstudentssql)) {
+            $hasgroupstudents = $DB->record_exists_sql($groupstudentssql[0], $groupstudentssql[1]);
+        }
+
         $hasquestions = quiz_questions_in_quiz($quiz->questions);
         if (!$table->is_downloading()) {
             if (!$hasquestions) {
                 echo quiz_no_questions_message($quiz, $cm, $this->context);
-            } else if (!$students) {
+            } else if (!$hasstudents) {
                 echo $OUTPUT->notification(get_string('nostudentsyet'));
             } else if ($currentgroup && !$groupstudents) {
                 echo $OUTPUT->notification(get_string('nostudentsingroup'));
@@ -115,7 +120,7 @@ class quiz_overview_report extends quiz_attempts_report {
             $this->form->display();
         }
 
-        $hasstudents = $students && (!$currentgroup || $groupstudents);
+        $hasstudents = $hasstudents && (!$currentgroup || $hasgroupstudents);
         if ($hasquestions && ($hasstudents || $options->attempts == self::ALL_WITH)) {
             // Construct the SQL.
             $fields = $DB->sql_concat('u.id', "'#'", 'COALESCE(quiza.attempt, 0)') .
@@ -128,7 +133,7 @@ class quiz_overview_report extends quiz_attempts_report {
                     "END) AS gradedattempt, ";
             }
 
-            list($fields, $from, $where, $params) = $table->base_sql($allowed);
+            list($fields, $from, $where, $params) = $table->base_sql($allowedsql);
 
             $table->set_count_sql("SELECT COUNT(1) FROM $from WHERE $where", $params);
 
@@ -151,7 +156,7 @@ class quiz_overview_report extends quiz_attempts_report {
                 // Output the regrade buttons.
                 if (has_capability('mod/quiz:regrade', $this->context)) {
                     $regradesneeded = $this->count_question_attempts_needing_regrade(
-                            $quiz, $groupstudents);
+                            $quiz, $groupstudentssql);
                     if ($currentgroup) {
                         $a= new stdClass();
                         $a->groupname = groups_get_group_name($currentgroup);
@@ -443,22 +448,23 @@ class quiz_overview_report extends quiz_attempts_report {
      * @param array $groupstudents user ids. If this is given, only data relating
      * to these users is cleared.
      */
-    protected function count_question_attempts_needing_regrade($quiz, $groupstudents) {
+    protected function count_question_attempts_needing_regrade($quiz, $groupstudentssql) {
         global $DB;
 
-        $usertest = '';
+        $userjoin = '';
+
         $params = array();
-        if ($groupstudents) {
-            list($usql, $params) = $DB->get_in_or_equal($groupstudents);
-            $usertest = "quiza.userid $usql AND ";
+        if ($groupstudentssql) {
+            $userjoin = "JOIN ({$groupstudentssql[0]}) AS enr ON enr.id = quiza.userid";
+            $params = $groupstudentssql[1];
         }
 
         $params[] = $quiz->id;
         $sql = "SELECT COUNT(DISTINCT quiza.id)
                 FROM {quiz_attempts} quiza
                 JOIN {quiz_overview_regrades} qqr ON quiza.uniqueid = qqr.questionusageid
+                $userjoin
                 WHERE
-                    $usertest
                     quiza.quiz = ? AND
                     quiza.preview = 0 AND
                     qqr.regraded = 0";

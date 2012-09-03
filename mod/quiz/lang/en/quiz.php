@@ -593,6 +593,7 @@ $string['questiontextisempty'] = '[Empty question text]';
 $string['questiontype'] = 'Question type {$a}';
 $string['questiontypesetupoptions'] = 'Setup options for question types:';
 $string['quiz:addinstance'] = 'Add a new quiz';
+$string['quiz:appearinreports'] = 'Appear in reports';
 $string['quiz:attempt'] = 'Attempt quizzes';
 $string['quizavailable'] = 'The quiz is available until: {$a}';
 $string['quizclose'] = 'Close the quiz';

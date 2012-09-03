@@ -95,7 +95,7 @@ class quiz_statistics_question_stats {
      * @param array $groupstudents students in this group.
      * @param bool $allattempts use all attempts, or just first attempts.
      */
-    public function load_step_data($quizid, $currentgroup, $groupstudents, $allattempts) {
+    public function load_step_data($quizid, $currentgroup, $groupstudentssql, $allattempts) {
         global $DB;
 
         $this->allattempts = $allattempts;
@@ -103,7 +103,7 @@ class quiz_statistics_question_stats {
         list($qsql, $qparams) = $DB->get_in_or_equal(array_keys($this->questions),
                 SQL_PARAMS_NAMED, 'q');
         list($fromqa, $whereqa, $qaparams) = quiz_statistics_attempts_sql(
-                $quizid, $currentgroup, $groupstudents, $allattempts, false);
+                $quizid, $currentgroup, $groupstudentssql, $allattempts, false);
 
         $this->lateststeps = $DB->get_records_sql("
                 SELECT
