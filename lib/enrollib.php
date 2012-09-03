@@ -1768,3 +1768,307 @@ abstract class enrol_plugin {
         return array();
     }
 }
+
+
+/**
+ * Returns array with sql code and parameters returning all ids
+ * of users enrolled into course.
+ *
+ * This function is using 'eu[0-9]+_' prefix for table names and parameters.
+ *
+ * @package   core_enrol
+ * @category  access
+ *
+ * @param context $context
+ * @param string $withcapability deprecated - use get_with_capability_join()
+ * @param int $groupid deprecated - use get_in_group_join(). 0 means ignore groups, any other value limits the result by group id
+ * @param bool $onlyactive consider only active enrolments in enabled plugins and time restrictions
+ * @return array list($sql, $params)
+ */
+function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, $onlyactive = false) {
+    global $DB, $CFG;
+
+    // use unique prefix just in case somebody makes some SQL magic with the result
+    static $i = 0;
+    $i++;
+    $prefix = 'eu'.$i.'_';
+
+    $joins  = array();
+    $wheres = array();
+    $paramsenrol = array();
+    $paramscap = array();
+    $paramsgroup = array();
+
+    // get all relevant capability info for all roles
+    if ($withcapability) {
+        list($joins[], $wheres[], $paramscap) = get_with_capability_join($context, $withcapability, $prefix.'u.id');
+    }
+
+    if ($groupid) {
+        list($joins[], $paramsgroup) = get_in_group_join($groupid, 'u.id');
+    }
+
+    list($joins[], $wheres[], $paramsenrol) = get_enrolled_join($context, $prefix.'u.id', $onlyactive);
+
+    $wheres[] = "{$prefix}u.deleted = 0";
+
+    $joins = implode("\n", $joins);
+    $wheres = "WHERE ".implode(" AND ", $wheres);
+
+    $sql = "SELECT DISTINCT {$prefix}u.id
+              FROM {user} {$prefix}u
+            $joins
+           $wheres";
+
+    return array($sql, array_merge($paramsenrol, $paramscap, $paramsgroup));
+}
+
+
+
+/**
+ * Returns array with sql joins and parameters returning all ids
+ * of users enrolled into course.
+ *
+ * This function is using 'eu[0-9]+_' prefix for table names and parameters.
+ *
+ * @package   core_enrol
+ * @category  access
+ *
+ * @param context $context
+ * @params string $useridcolumn User id column used the calling query, e.g. u.id
+ * @param bool $onlyactive consider only active enrolments in enabled plugins and time restrictions
+ * @return array list($sql, $params)
+ */
+function get_enrolled_join(context $context, $useridcolumn, $onlyactive) {
+    global $DB, $CFG;
+
+    // use unique prefix just in case somebody makes some SQL magic with the result
+    static $i = 0;
+    $i++;
+    $prefix = 'ej'.$i.'_';
+
+    // first find the course context
+    $coursecontext = $context->get_course_context();
+
+    $isfrontpage = ($coursecontext->instanceid == SITEID);
+
+    $joins  = array();
+    $wheres = array();
+    $params = array();
+
+    $wheres[] = "1 = 1"; // prevent broken where clauses later on
+
+    if ($isfrontpage) {
+        // all users are "enrolled" on the frontpage
+    } else {
+        $joins[] = "JOIN {user_enrolments} {$prefix}ue ON {$prefix}ue.userid = $useridcolumn";
+        $joins[] = "JOIN {enrol} {$prefix}e ON ({$prefix}e.id = {$prefix}ue.enrolid AND {$prefix}e.courseid = :{$prefix}courseid)";
+        $params[$prefix.'courseid'] = $coursecontext->instanceid;
+
+        if ($onlyactive) {
+            $wheres[] = "{$prefix}ue.status = :{$prefix}active AND {$prefix}e.status = :{$prefix}enabled";
+            $wheres[] = "{$prefix}ue.timestart < :{$prefix}now1 AND ({$prefix}ue.timeend = 0 OR {$prefix}ue.timeend > :{$prefix}now2)";
+            $now = round(time(), -2); // rounding helps caching in DB
+            $params = array_merge($params, array($prefix.'enabled'=>ENROL_INSTANCE_ENABLED,
+                                                 $prefix.'active'=>ENROL_USER_ACTIVE,
+                                                 $prefix.'now1'=>$now, $prefix.'now2'=>$now));
+        }
+    }
+
+    $joins = implode("\n", $joins);
+    $wheres = implode(" AND ", $wheres);
+
+    return array($joins, $wheres, $params);
+}
+
+
+
+/**
+ * Returns list of users enrolled into course.
+ *
+ * @package   core_enrol
+ * @category  access
+ *
+ * @param context $context
+ * @param string $withcapability
+ * @param int $groupid 0 means ignore groups, any other value limits the result by group id
+ * @param string $userfields requested user record fields
+ * @param string $orderby
+ * @param int $limitfrom return a subset of records, starting at this point (optional, required if $limitnum is set).
+ * @param int $limitnum return a subset comprising this many records (optional, required if $limitfrom is set).
+ * @return array of user records
+ */
+function get_enrolled_users(context $context, $withcapability = '', $groupid = 0, $userfields = 'u.*', $orderby = '', $limitfrom = 0, $limitnum = 0) {
+    global $DB;
+
+    $joins = array();
+    $wheres = array();
+    $eparams = array();
+    $cparams = array();
+    $gparams = array();
+
+    list($joins[], $wheres[], $eparams) = get_enrolled_join($context, 'u.id', false);
+
+    if ($withcapability) {
+        list($joins[], $wheres[], $cparams) = get_with_capability_join($context, $withcapability, 'u.id');
+    }
+
+    if ($groupid) {
+        list($joins[], $gparams) = get_in_group_join($groupid, 'u.id');
+    }
+
+    $joins = implode("\n", $joins);
+    $wheres = implode(" AND ", $wheres);
+    $params = array_merge($eparams, $cparams, $gparams);
+
+    $sql = "SELECT DISTINCT $userfields
+              FROM {user} u
+              $joins
+             WHERE $wheres AND u.deleted = 0";
+
+    if ($orderby) {
+        $sql = "$sql ORDER BY $orderby";
+    } else {
+        $sql = "$sql ORDER BY u.lastname ASC, u.firstname ASC";
+    }
+
+    return $DB->get_records_sql($sql, $params, $limitfrom, $limitnum);
+}
+
+
+
+/**
+ * Counts list of users enrolled into course (as per above function)
+ *
+ * @package   core_enrol
+ * @category  access
+ *
+ * @param context $context
+ * @param string $withcapability
+ * @param int $groupid 0 means ignore groups, any other value limits the result by group id
+ * @return array of user records
+ */
+function count_enrolled_users(context $context, $withcapability = '', $groupid = 0) {
+    global $DB;
+
+    $joins = array();
+    $wheres = array();
+    $eparams = array();
+    $cparams = array();
+    $gparams = array();
+
+    list($joins[], $wheres[], $eparams) = get_enrolled_join($context, 'u.id', false);
+
+    if ($withcapability) {
+        list($joins[], $wheres[], $cparams) = get_with_capability_join($context, $withcapability, 'u.id');
+    }
+
+    if ($groupid) {
+        list($joins[], $gparams) = get_in_group_join($groupid, 'u.id');
+    }
+
+    $joins = implode("\n", $joins);
+    $wheres = implode(" AND ", $wheres);
+    $params = array_merge($eparams, $cparams, $gparams);
+
+    $sql = "SELECT count(u.id)
+              FROM {user} u
+              $joins
+             WHERE $wheres AND u.deleted = 0";
+
+    return $DB->count_records_sql($sql, $params);
+}
+
+
+
+/**
+ * Returns true if user is enrolled (is participating) in course
+ * this is intended for students and teachers.
+ *
+ * Since 2.2 the result for active enrolments and current user are cached.
+ *
+ * @package   core_enrol
+ * @category  access
+ *
+ * @param context $context
+ * @param int|stdClass $user if null $USER is used, otherwise user object or id expected
+ * @param string $withcapability extra capability name
+ * @param bool $onlyactive consider only active enrolments in enabled plugins and time restrictions
+ * @return bool
+ */
+function is_enrolled(context $context, $user = null, $withcapability = '', $onlyactive = false) {
+    global $USER, $DB;
+
+    // first find the course context
+    $coursecontext = $context->get_course_context();
+
+    // make sure there is a real user specified
+    if ($user === null) {
+        $userid = isset($USER->id) ? $USER->id : 0;
+    } else {
+        $userid = is_object($user) ? $user->id : $user;
+    }
+
+    if (empty($userid)) {
+        // not-logged-in!
+        return false;
+    } else if (isguestuser($userid)) {
+        // guest account can not be enrolled anywhere
+        return false;
+    }
+
+    if ($coursecontext->instanceid == SITEID) {
+        // everybody participates on frontpage
+    } else {
+        // try cached info first - the enrolled flag is set only when active enrolment present
+        if ($USER->id == $userid) {
+            $coursecontext->reload_if_dirty();
+            if (isset($USER->enrol['enrolled'][$coursecontext->instanceid])) {
+                if ($USER->enrol['enrolled'][$coursecontext->instanceid] > time()) {
+                    if ($withcapability and !has_capability($withcapability, $context, $userid)) {
+                        return false;
+                    }
+                    return true;
+                }
+            }
+        }
+
+        if ($onlyactive) {
+            // look for active enrolments only
+            $until = enrol_get_enrolment_end($coursecontext->instanceid, $userid);
+
+            if ($until === false) {
+                return false;
+            }
+
+            if ($USER->id == $userid) {
+                if ($until == 0) {
+                    $until = ENROL_MAX_TIMESTAMP;
+                }
+                $USER->enrol['enrolled'][$coursecontext->instanceid] = $until;
+                if (isset($USER->enrol['tempguest'][$coursecontext->instanceid])) {
+                    unset($USER->enrol['tempguest'][$coursecontext->instanceid]);
+                    remove_temp_course_roles($coursecontext);
+                }
+            }
+
+        } else {
+            // any enrolment is good for us here, even outdated, disabled or inactive
+            $sql = "SELECT 'x'
+                      FROM {user_enrolments} ue
+                      JOIN {enrol} e ON (e.id = ue.enrolid AND e.courseid = :courseid)
+                      JOIN {user} u ON u.id = ue.userid
+                     WHERE ue.userid = :userid AND u.deleted = 0";
+            $params = array('userid'=>$userid, 'courseid'=>$coursecontext->instanceid);
+            if (!$DB->record_exists_sql($sql, $params)) {
+                return false;
+            }
+        }
+    }
+
+    if ($withcapability and !has_capability($withcapability, $context, $userid)) {
+        return false;
+    }
+
+    return true;
+}
